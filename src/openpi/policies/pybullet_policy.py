@@ -12,7 +12,7 @@ def make_bullet_example() -> dict:
     return {
         "observation/state": np.random.rand(7),
         "observation/image": np.random.randint(255, size=(224, 224, 3), dtype=np.uint8),
-        "observation/wrist_image": np.random.randint(255, size=(224, 224, 3), dtype=np.uint8),
+        # "observation/wrist_image": np.random.randint(255, size=(224, 224, 3), dtype=np.uint8),
         "prompt": "put white cube on tray",
     }
 
@@ -62,9 +62,12 @@ class BulletInputs(transforms.DataTransformFn):
             },
             "image_mask": {
                 "base_0_rgb": np.True_,
-                "left_wrist_0_rgb": np.True_,
+                # "left_wrist_0_rgb": np.True_,
+                # # We only mask padding images for pi0 model, not pi0-FAST. Do not change this for your own dataset.
+                # "right_wrist_0_rgb": np.True_ if self.model_type == _model.ModelType.PI0_FAST else np.False_,
+                "left_wrist_0_rgb": np.False_,
                 # We only mask padding images for pi0 model, not pi0-FAST. Do not change this for your own dataset.
-                "right_wrist_0_rgb": np.True_ if self.model_type == _model.ModelType.PI0_FAST else np.False_,
+                "right_wrist_0_rgb": np.False_,
             },
         }
 
