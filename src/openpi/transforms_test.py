@@ -117,5 +117,8 @@ def test_extract_prompt_from_task():
     data = transform({"task_index": 1})
     assert data["prompt"] == "Hello, world!"
 
+    data = transform({"task": "LeRobot v3 task", "task_index": 1})
+    assert data["prompt"] == "LeRobot v3 task"
+
     with pytest.raises(ValueError, match="task_index=2 not found in task mapping"):
         transform({"task_index": 2})

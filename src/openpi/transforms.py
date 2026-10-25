@@ -314,6 +314,13 @@ class PromptFromLeRobotTask(DataTransformFn):
     tasks: dict[int, str]
 
     def __call__(self, data: DataDict) -> DataDict:
+        # LeRobot v3 resolves the task string in each sample. Older versions
+        # expose only task_index and require the metadata mapping below.
+        if (prompt := data.get("task")) is not None:
+            if isinstance(prompt, bytes):
+                prompt = prompt.decode("utf-8")
+            return {**data, "prompt": prompt}
+
         if "task_index" not in data:
             raise ValueError('Cannot extract prompt without "task_index"')
 

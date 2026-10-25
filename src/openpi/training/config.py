@@ -65,6 +65,11 @@ class AssetsConfig:
 class DataConfig:
     # LeRobot repo id. If None, fake data will be created.
     repo_id: str | None = None
+    # Optional local root of a LeRobot dataset. When set, the dataset is read
+    # directly from this directory instead of being downloaded from the Hub.
+    root: str | None = None
+    # Optional LeRobot video decoder (for example, "pyav" or "torchcodec").
+    video_backend: str | None = None
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -167,6 +172,8 @@ class ModelTransformFactory(GroupFactory):
 class DataConfigFactory(abc.ABC):
     # The LeRobot repo id.
     repo_id: str = tyro.MISSING
+    # Optional local root of the LeRobot dataset.
+    root: str | None = None
     # Determines how the assets will be loaded.
     assets: AssetsConfig = dataclasses.field(default_factory=AssetsConfig)
     # Base config that will be updated by the factory.
@@ -182,6 +189,7 @@ class DataConfigFactory(abc.ABC):
         return dataclasses.replace(
             self.base_config or DataConfig(),
             repo_id=repo_id,
+            root=self.root,
             asset_id=asset_id,
             norm_stats=self._load_norm_stats(epath.Path(self.assets.assets_dir or assets_dirs), asset_id),
             use_quantile_norm=model_config.model_type != ModelType.PI0,
@@ -459,6 +467,56 @@ class LeRobotDROIDDataConfig(DataConfigFactory):
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=model_transforms,
+        )
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotTM7SDataConfig(DataConfigFactory):
+    """Data pipeline for the local Techman TM7S LeRobot dataset.
+
+    The dataset stores absolute TCP pose targets. By default, the model is
+    trained on pose deltas for the six Cartesian pose dimensions and an
+    absolute gripper value.
+    """
+
+    use_delta_pose_actions: bool = True
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/image": "observation.images.table",
+                        "observation/wrist_image": "observation.images.wrist",
+                        "observation/state": "observation.state",
+                        "actions": "action",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+        delta_action_mask = _transforms.make_bool_mask(6, -1)
+        data_transforms = _transforms.Group(
+            inputs=[libero_policy.LiberoInputs(model_type=model_config.model_type)],
+            outputs=[libero_policy.LiberoOutputs()],
+        )
+        if self.use_delta_pose_actions:
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory()(model_config),
+            action_sequence_keys=("action",),
+            prompt_from_task=True,
+            # PyAV was validated with the dataset's AV1 video files and does
+            # not rely on system FFmpeg shared libraries like TorchCodec.
+            video_backend="pyav",
         )
 
 
@@ -913,6 +971,23 @@ _CONFIGS = [
             ),
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_droid/params"),
+        num_train_steps=20_000,
+        batch_size=32,
+    ),
+    # Fine-tuning the pi0.5 base model on the local Techman TM7S dataset.
+    TrainConfig(
+        name="pi05_tm7s_finetune",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            # At 15 Hz, 16 actions cover approximately one second.
+            action_horizon=16,
+        ),
+        data=LeRobotTM7SDataConfig(
+            repo_id="local/tm7s_bowl_green_basket",
+            root="data/real_50ep_1026/real_robot_data/tm7s_lerobot",
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=20_000,
         batch_size=32,
     ),

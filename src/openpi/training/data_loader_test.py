@@ -1,4 +1,5 @@
 import dataclasses
+from types import SimpleNamespace
 
 import jax
 
@@ -60,6 +61,42 @@ def test_with_fake_dataset():
 
     for _, actions in batches:
         assert actions.shape == (config.batch_size, config.model.action_horizon, config.model.action_dim)
+
+
+def test_create_torch_dataset_uses_local_root(monkeypatch):
+    calls = {}
+
+    class FakeMetadata:
+        fps = 15
+
+        def __init__(self, repo_id, *, root=None):
+            calls["metadata"] = (repo_id, root)
+
+    class FakeLeRobotDataset:
+        def __init__(self, repo_id, *, root=None, delta_timestamps=None, video_backend=None):
+            calls["dataset"] = (repo_id, root, delta_timestamps, video_backend)
+
+    monkeypatch.setattr(
+        _data_loader,
+        "lerobot_dataset",
+        SimpleNamespace(LeRobotDatasetMetadata=FakeMetadata, LeRobotDataset=FakeLeRobotDataset),
+    )
+    data_config = _config.DataConfig(
+        repo_id="local/example",
+        root="/datasets/example",
+        action_sequence_keys=("action",),
+    )
+    model_config = pi0_config.Pi0Config(action_horizon=3)
+
+    _data_loader.create_torch_dataset(data_config, action_horizon=3, model_config=model_config)
+
+    assert calls["metadata"] == ("local/example", "/datasets/example")
+    assert calls["dataset"] == (
+        "local/example",
+        "/datasets/example",
+        {"action": [0.0, 1 / 15, 2 / 15]},
+        None,
+    )
 
 
 def test_with_real_dataset():
