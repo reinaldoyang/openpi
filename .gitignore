@@ -2,6 +2,7 @@
 assets/
 checkpoints/
 data/
+eval_results/
 wandb/
 
 # Byte-compiled / optimized / DLL files

@@ -982,14 +982,33 @@ _CONFIGS = [
             action_dim=32,
             # At 15 Hz, 16 actions cover approximately one second.
             action_horizon=16,
+            # All 11,698 frames use at most 50 tokens with the current task
+            # prompt and normalized state, so 64 avoids unnecessary padding.
+            max_token_len=64,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
         ),
         data=LeRobotTM7SDataConfig(
             repo_id="local/tm7s_bowl_green_basket",
             root="data/real_50ep_1026/real_robot_data/tm7s_lerobot",
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
-        num_train_steps=20_000,
-        batch_size=32,
+        num_train_steps=10_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=64,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        # EMA duplicates model parameters and is unnecessary for LoRA.
+        ema_decay=None,
+        # Replicate the LoRA model on all three GPUs and data-parallelize the
+        # global batch instead of using communication-heavy FSDP.
+        batch_size=3,
+        fsdp_devices=1,
+        wandb_enabled=True,
     ),
     #
     # ALOHA Sim configs. This config is used to demonstrate how to train on a simple simulated environment.

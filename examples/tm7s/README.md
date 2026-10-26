@@ -36,6 +36,13 @@ The action horizon is 16 frames, or about 1.07 seconds at 15 Hz. Actions and
 state are padded from 7 to pi0.5's 32-dimensional model space after the robot
 transforms run.
 
+The fine-tuning config uses LoRA adapters for both the PaliGemma backbone and
+the action expert. Base language-model weights are frozen, EMA is disabled, and
+the model is replicated across the server's three GPUs (`fsdp_devices=1`) for
+data-parallel training with a global batch size of 3. The 64-token input limit
+was validated against all 11,698 dataset frames; the longest encoded prompt and
+state uses 50 tokens. Increase this limit if inference will use longer prompts.
+
 ## Server commands
 
 Run commands from the repository root. If the dataset is elsewhere on the
@@ -67,3 +74,33 @@ observation = {
 The policy returns `actions` with shape `(16, 7)` in the dataset's absolute TCP
 command convention. Apply robot-side safety limits before sending predictions
 to the TM controller.
+
+## Offline training-data evaluation
+
+The offline evaluator decodes observations from the local training dataset,
+runs the policy without connecting to the robot, and compares its predicted
+16-step action chunks with the recorded chunks. Padded actions at episode ends
+are excluded. It reports position error in meters, SO(3) geodesic orientation
+error, gripper accuracy, per-horizon metrics, and predictions outside the
+empirical training-data range.
+
+Evaluate the final LoRA checkpoint on 100 deterministic random frames:
+
+```bash
+uv run examples/tm7s/evaluate_offline.py
+```
+
+The summary JSON and optional raw prediction NPZ are written under
+`eval_results/tm7s_offline/`. To compare the retained 5,000-step checkpoint on
+the exact same observations and diffusion noise, keep `--num-samples` and
+`--seed` unchanged:
+
+```bash
+uv run examples/tm7s/evaluate_offline.py \
+  --checkpoint-dir checkpoints/pi05_tm7s_finetune/tm7s_bowl_green_basket_lora/5000
+```
+
+For a quick smoke test, use `--num-samples 2`. This evaluation measures how
+well the policy imitates recorded training actions. It does not measure task
+success, generalization, or closed-loop robot safety; those require held-out
+episodes and carefully supervised robot rollouts.
