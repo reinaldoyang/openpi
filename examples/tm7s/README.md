@@ -104,3 +104,66 @@ For a quick smoke test, use `--num-samples 2`. This evaluation measures how
 well the policy imitates recorded training actions. It does not measure task
 success, generalization, or closed-loop robot safety; those require held-out
 episodes and carefully supervised robot rollouts.
+
+## Guarded RTRS rollout
+
+`rollout.py` uses the verified RTRS/TMRTC, RealSense, guarded-home, workspace,
+and Robotiq code in the sibling `~/tm7s_keyboard_teleop` repository. Install
+its optional hardware dependencies and run the offline rate/workspace checks:
+
+```bash
+uv sync --locked --group tm7s-rollout
+uv run --locked --group tm7s-rollout \
+  examples/tm7s/rollout.py --self-test
+```
+
+The rollout defaults to prediction-only. It opens TMRTS, both cameras, and the
+gripper for observation, but it does not open TMRTC or send robot targets:
+
+```bash
+uv run --locked --group tm7s-rollout examples/tm7s/rollout.py
+```
+
+The focused Pygame window displays the live table and wrist RGB feeds side by
+side, continues refreshing them at 15 Hz while policy inference runs in the
+background, and uses these controls:
+
+- `S`: start a fresh inference generation.
+- `X`: latch stopped, invalidate in-flight inference, and clear the action
+  chunk. In live mode it also sends TMRTC Mode-7 stop and requires its
+  acknowledgement. During guarded home it aborts the joint motion and returns
+  to the stopped rollout GUI; it does not close the program.
+- `H` twice within three seconds: in live mode, stop and flush policy work,
+  explicitly open the gripper, execute the guarded joint-home trajectory, and
+  remain stopped at home. Opening happens before homing and can drop a held
+  object, so clear the gripper area first.
+- `Escape`: stop and exit.
+
+The initial live controller is deliberately stop-and-observe: it holds the
+current command while inference runs, executes one bounded 16-action chunk at
+15 Hz, decelerates the command target, and then requests a fresh observation.
+Translation defaults to 75 mm/s and 300 mm/s²; policy orientation is locked to
+the startup orientation. Gripper predictions use hysteresis (close at `>=0.7`,
+open at `<=0.3`). The z ceiling is raised 5 mm above the teleop workspace.
+Predictions up to 20 mm outside the RobotBase workspace are clipped to its
+edge; predictions further outside stop the rollout.
+
+Commission the `X` path before allowing policy output. With the workspace
+clear, RobotBase selected, reduced controller limits active, Play pressed, and
+the physical emergency stop accessible, run:
+
+```bash
+uv run --locked --group tm7s-rollout examples/tm7s/rollout.py \
+  --enable-actuation --hold-only
+```
+
+Press Enter at the arming prompt, press `S`, verify that the TCP only holds its
+freshly measured pose, then press `X`. Confirm both the terminal's
+`STOPPOL: 00 OK` acknowledgement and that TMflow reports motion control
+stopped. Hold-only mode does not require the policy server. Repeat this test
+before the first policy rollout.
+
+Only after prediction-only outputs and the hold-only stop test are reviewed,
+omit `--hold-only` to permit bounded policy commands. `X` is a software stop,
+not a safety-rated emergency stop: it cannot cover a frozen PC, broken network,
+or unavailable controller.

@@ -61,6 +61,11 @@ rlds = [
     "tensorflow-cpu==2.15.0",
     "tensorflow-datasets==4.9.9",
 ]
+tm7s-rollout = [
+    "pygame>=2.5",
+    "pymodbus>=3,<4",
+    "pyrealsense2",
+]
 
 [tool.uv]
 # LeRobot only uses rerun-sdk for visualization. 0.23+ requires NumPy 2,
