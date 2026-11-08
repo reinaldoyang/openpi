@@ -138,9 +138,13 @@ def create_torch_dataset(
         return FakeDataset(model_config, num_samples=1024)
 
     dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=data_config.root)
+    episodes = None
+    if data_config.exclude_episodes:
+        episodes = [e for e in range(dataset_meta.total_episodes) if e not in data_config.exclude_episodes]
     dataset = lerobot_dataset.LeRobotDataset(
         data_config.repo_id,
         root=data_config.root,
+        episodes=episodes,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },

@@ -111,6 +111,18 @@ def test_transform_dict():
     assert output == {"a": {"b": 1, "d": 1}, "b": {"d": 2}}
 
 
+def test_wrap_angles():
+    transform = _transforms.WrapAngles(dims=(1,))
+    state = np.array([0.5, -np.pi + 0.01, 0.5])
+    actions = np.array([[0.5, np.pi - 0.01, 0.5]])
+
+    data = transform({"state": state, "actions": actions})
+
+    np.testing.assert_allclose(data["state"], [0.5, np.pi + 0.01, 0.5])
+    np.testing.assert_allclose(data["actions"], [[0.5, np.pi - 0.01, 0.5]])
+    np.testing.assert_allclose(state[1], -np.pi + 0.01)  # input not modified
+
+
 def test_extract_prompt_from_task():
     transform = _transforms.PromptFromLeRobotTask({1: "Hello, world!"})
 

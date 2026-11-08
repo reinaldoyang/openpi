@@ -70,6 +70,8 @@ class DataConfig:
     root: str | None = None
     # Optional LeRobot video decoder (for example, "pyav" or "torchcodec").
     video_backend: str | None = None
+    # LeRobot episode indices to leave out of training and norm stats.
+    exclude_episodes: tuple[int, ...] = ()
     # Directory within the assets directory containing the data assets.
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
@@ -480,6 +482,8 @@ class LeRobotTM7SDataConfig(DataConfigFactory):
     """
 
     use_delta_pose_actions: bool = True
+    # LeRobot episode indices to leave out. Changing this requires recomputing norm stats.
+    exclude_episodes: tuple[int, ...] = ()
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
@@ -498,7 +502,11 @@ class LeRobotTM7SDataConfig(DataConfigFactory):
         )
         delta_action_mask = _transforms.make_bool_mask(6, -1)
         data_transforms = _transforms.Group(
-            inputs=[libero_policy.LiberoInputs(model_type=model_config.model_type)],
+            inputs=[
+                libero_policy.LiberoInputs(model_type=model_config.model_type),
+                # rx sits near 180 deg and the controller sometimes reports it as -180 deg.
+                _transforms.WrapAngles(dims=(3,)),
+            ],
             outputs=[libero_policy.LiberoOutputs()],
         )
         if self.use_delta_pose_actions:
@@ -517,6 +525,7 @@ class LeRobotTM7SDataConfig(DataConfigFactory):
             # PyAV was validated with the dataset's AV1 video files and does
             # not rely on system FFmpeg shared libraries like TorchCodec.
             video_backend="pyav",
+            exclude_episodes=self.exclude_episodes,
         )
 
 
@@ -1006,6 +1015,43 @@ _CONFIGS = [
         ema_decay=None,
         # Replicate the LoRA model on all three GPUs and data-parallelize the
         # global batch instead of using communication-heavy FSDP.
+        batch_size=3,
+        fsdp_devices=1,
+        wandb_enabled=True,
+    ),
+    # Same recipe as pi05_tm7s_finetune, on the 5-task TM7S dataset. Uses the
+    # 105-episode set minus episodes 5, 7 and 9, the only ones with wrist (rz)
+    # rotation; their rare large rz deltas caused loss spikes and NaNs.
+    TrainConfig(
+        name="pi05_tm7s_multitask_finetune",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=16,
+            # The longest task prompt plus a worst-case 7-dim state needs 65
+            # tokens, so 64 would truncate it.
+            max_token_len=80,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotTM7SDataConfig(
+            # With a local root, repo_id only names the norm-stats folder. It differs
+            # from the full 105-episode set because the stats differ.
+            repo_id="local/tm7s_multitask_102ep",
+            root="data/tm7s_lerobot_105ep_1105",
+            exclude_episodes=(5, 7, 9),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=10_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=80,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
         batch_size=3,
         fsdp_devices=1,
         wandb_enabled=True,

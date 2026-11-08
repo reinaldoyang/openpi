@@ -223,6 +223,25 @@ class DeltaActions(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class WrapAngles(DataTransformFn):
+    """Wraps angle dimensions of the state and actions into [0, 2*pi).
+
+    For rotations that sit near +/-pi, the controller can report the same
+    orientation as either +pi or -pi. Wrapping keeps such values continuous.
+    """
+
+    dims: Sequence[int]
+
+    def __call__(self, data: DataDict) -> DataDict:
+        for key in ("state", "actions"):
+            if key in data:
+                values = np.array(data[key], copy=True)
+                values[..., self.dims] = np.mod(values[..., self.dims], 2 * np.pi)
+                data[key] = values
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
 class AbsoluteActions(DataTransformFn):
     """Repacks delta actions into absolute action space."""
 

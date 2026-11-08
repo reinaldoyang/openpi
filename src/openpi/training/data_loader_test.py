@@ -68,13 +68,15 @@ def test_create_torch_dataset_uses_local_root(monkeypatch):
 
     class FakeMetadata:
         fps = 15
+        total_episodes = 3
 
         def __init__(self, repo_id, *, root=None):
             calls["metadata"] = (repo_id, root)
 
     class FakeLeRobotDataset:
-        def __init__(self, repo_id, *, root=None, delta_timestamps=None, video_backend=None):
+        def __init__(self, repo_id, *, root=None, episodes=None, delta_timestamps=None, video_backend=None):
             calls["dataset"] = (repo_id, root, delta_timestamps, video_backend)
+            calls["episodes"] = episodes
 
     monkeypatch.setattr(
         _data_loader,
@@ -97,6 +99,11 @@ def test_create_torch_dataset_uses_local_root(monkeypatch):
         {"action": [0.0, 1 / 15, 2 / 15]},
         None,
     )
+    assert calls["episodes"] is None
+
+    data_config = dataclasses.replace(data_config, exclude_episodes=(1,))
+    _data_loader.create_torch_dataset(data_config, action_horizon=3, model_config=model_config)
+    assert calls["episodes"] == [0, 2]
 
 
 def test_with_real_dataset():
