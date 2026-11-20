@@ -482,6 +482,9 @@ class LeRobotTM7SDataConfig(DataConfigFactory):
     """
 
     use_delta_pose_actions: bool = True
+    # Wrap dim 3 (TCP rx) into [0, 2*pi). Must be False for joint-space datasets,
+    # where dim 3 is joint 4.
+    wrap_rx: bool = True
     # LeRobot episode indices to leave out. Changing this requires recomputing norm stats.
     exclude_episodes: tuple[int, ...] = ()
 
@@ -505,7 +508,7 @@ class LeRobotTM7SDataConfig(DataConfigFactory):
             inputs=[
                 libero_policy.LiberoInputs(model_type=model_config.model_type),
                 # rx sits near 180 deg and the controller sometimes reports it as -180 deg.
-                _transforms.WrapAngles(dims=(3,)),
+                *([_transforms.WrapAngles(dims=(3,))] if self.wrap_rx else []),
             ],
             outputs=[libero_policy.LiberoOutputs()],
         )
@@ -1040,6 +1043,43 @@ _CONFIGS = [
             repo_id="local/tm7s_multitask_102ep",
             root="data/tm7s_lerobot_105ep_1105",
             exclude_episodes=(5, 7, 9),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=10_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=80,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=3,
+        fsdp_devices=1,
+        wandb_enabled=True,
+    ),
+    # Same recipe as pi05_tm7s_multitask_finetune, in joint space, on the 54-episode
+    # 4-task dataset collected 2026-11-19 (converted with --action-space joint).
+    # State = measured joints (rad) + gripper. Action = step-wise joint delta
+    # (commanded - measured joints at the same step) + binary gripper. The deltas
+    # are already in the dataset, so no delta transform and no rx wrap. At
+    # inference, command current measured joints + actions[k, :6] at every step.
+    TrainConfig(
+        name="pi05_tm7s_joint_delta_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=80,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotTM7SDataConfig(
+            repo_id="local/tm7s_joint_delta_1119",
+            root="data/tm7s_lerobot_joint_54ep_1119",
+            use_delta_pose_actions=False,
+            wrap_rx=False,
         ),
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         num_train_steps=10_000,
