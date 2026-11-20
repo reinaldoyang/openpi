@@ -201,8 +201,12 @@ The following were verified against the current file:
 - **Gripper width**
   - `RolloutGripper` commands 6.5 mm on CLOSE. During joint data collection,
     the commanded widths were exactly 0 mm (closed) and 85 mm (open).
-  - Ask the user which to use. `_apply_gripper` hysteresis (close `>= 0.70`,
-    open `<= 0.30`) can stay.
+  - Decision (user, 2026-11-20): joint mode commands exactly 0 mm on CLOSE and
+    85 mm on OPEN, matching collection.
+  - `GRIPPER_CLOSED_WIDTH_MM = 6.5` is also the TCP model's gripper-state
+    span, so do not edit it. Give joint mode its own close width (0 mm) and
+    state span (85 mm).
+  - `_apply_gripper` hysteresis (close `>= 0.70`, open `<= 0.30`) can stay.
 
 ### Facts for limit design
 
