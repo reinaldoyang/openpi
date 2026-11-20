@@ -35,12 +35,49 @@ other, or compare their losses.
   `uv run scripts/compute_norm_stats.py --config-name pi05_tm7s_joint_delta_lora`.
   Recompute them whenever the dataset or `exclude_episodes` changes; never reuse
   stats from another config.
-- Training command (only when the user asks for the run):
+- Training command (only when the user asks for the run; see the next section
+  for choosing `<free_gpu>`):
 
   ```bash
-  XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/train.py \
+  OPENPI_DATA_HOME=/data/reinaldoyang/openpi_cache \
+  CUDA_VISIBLE_DEVICES=<free_gpu> XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 \
+    uv run scripts/train.py \
     pi05_tm7s_joint_delta_lora --exp-name=tm7s_joint_delta_54ep
   ```
+
+## Training server environment
+
+The training server is shared with other users. Check these before every
+training, norm-stats, or serving run on it:
+
+- **Disk.**
+  - Keep every large file on `/data` (7 TB). `/` and `/home` are a separate,
+    shared 879 GB root disk that is nearly full.
+  - openpi's download cache defaults to `~/.cache/openpi` on the root disk.
+    Always set `OPENPI_DATA_HOME=/data/reinaldoyang/openpi_cache`. It holds the
+    12 GB `pi05_base` weights and the PaliGemma tokenizer.
+  - On 2026-11-20 a run without this setting filled `/` to 0 bytes free. The
+    run left a truncated `pi05_base` download, which then failed with an Orbax
+    `OUT_OF_RANGE ... byte range` error. Orbax still wrote
+    `commit_success.txt`, so openpi will not re-download a truncated copy by
+    itself; delete it first.
+  - Run `df -h / /data` before downloading anything large.
+- **GPU.**
+  - The server has three RTX 6000 Ada GPUs (48 GB each), and other users run
+    jobs on them.
+  - Run `nvidia-smi` first, pick an idle GPU, and always set
+    `CUDA_VISIBLE_DEVICES` to that one GPU. Without it, JAX preallocates
+    `XLA_PYTHON_CLIENT_MEM_FRACTION` of memory on every visible GPU and can
+    crash other users' jobs.
+  - The config uses one GPU (`fsdp_devices=1`).
+- **Launch.**
+  - Start long runs detached
+    (`nohup setsid ... > train_<exp>.log 2>&1 < /dev/null &`) so they survive
+    the agent session. `*.log` is git-ignored.
+  - If a run fails at startup, remove the stub
+    `checkpoints/<config>/<exp>/` directory (or pass `--overwrite`) before
+    relaunching.
+  - W&B credentials are in `~/.netrc`.
 
 - An inference installation needs the complete `params/` tree,
   `_CHECKPOINT_METADATA`, and the checkpoint's
@@ -241,6 +278,8 @@ These are diagnostics, not safety limits:
 uv sync
 uv lock --check
 uv run python -c "import jax; print(jax.devices())"
+# On the shared training server, also set OPENPI_DATA_HOME and
+# CUDA_VISIBLE_DEVICES as described in "Training server environment".
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 uv run scripts/serve_policy.py \
   policy:checkpoint \
   --policy.config=pi05_tm7s_joint_delta_lora \
