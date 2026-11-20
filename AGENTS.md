@@ -140,16 +140,96 @@ the joint-delta policy as they stand:
   action dims 0-2. Joint-space evaluation needs per-joint error in radians
   (optionally TCP error through forward kinematics). It must never be
   repurposed to send robot commands.
-- `examples/tm7s/rollout.py` streams Cartesian TCP targets. A joint-mode client
-  must send `[measured joints (rad), gripper]` as state, command
-  `measured_joints_now + actions[k, :6]` (converted to degrees) at each step,
-  map the gripper to close (0 mm) / open (85 mm) with hysteresis, keep joint
-  speed limits (data collection used at most 17 deg/s), and check the TCP
-  workspace with forward kinematics.
+- `examples/tm7s/rollout.py` streams Cartesian TCP targets. See the next
+  section for what must change.
 
 Build or adapt either only when the user asks. A rollout client must start in
 prediction-only mode and follow the safety rules above. Ask the user for the
 confirmed safety limits before implementing command execution.
+
+## Adapting `examples/tm7s/rollout.py` to joint space
+
+Ask the user whether to add a joint mode to `rollout.py` or write a separate
+script. Keep the TCP path working, because the archived TCP checkpoint still
+depends on it.
+
+### Hardware dependencies
+
+`rollout.py` imports its hardware primitives from the `tm7s_keyboard_teleop`
+repository (`--teleop-root`, default `/home/reinaldoyang/tm7s_keyboard_teleop`).
+The modules are `teleoperation.tmrtc_cartesian_xyz_teleop`,
+`teleoperation.tmrtc_data_collection` and
+`testing.tmrtc_cartesian_hold_test`. The joint dataset was collected and
+converted with `tm7s_teleop_rtrs` (converter commit `bae2ce3`). Neither repo is
+on the training server.
+
+On the lab machine, find the joint-mode TMRTC primitives the joint collector
+used (mode settings packet, joint target packet, units) and reuse them. Do not
+write new protocol code.
+
+### Code that assumes TCP space
+
+The following were verified against the current file:
+
+- **`ObservationSource.capture`**
+  - State is built from `feedback.state.base_pose` (mm/deg converted to
+    m/rad). Use the measured joints instead (`feedback.state.joints`; check its
+    units in the teleop repo; the model needs radians).
+  - The gripper state uses `(85 - width) / (85 - 6.5)`. The joint dataset uses
+    `(85 - width_mm) / 85` (verified on all 32,994 frames). The old formula
+    differs by up to 0.076, so change the span to 85.
+- **`CommandFilter`**
+  - It converts an absolute TCP pose to mm/deg, clips to the RobotBase
+    workspace, locks orientation (`lock_orientation=True`), and rate-limits
+    translation and orientation.
+  - Replace it with a joint filter: target `measured_joints_now +
+    actions[k, :6]`, converted rad to deg, with a fresh, non-stale feedback
+    read every tick.
+  - Add per-joint position, speed and acceleration limits, and a TCP workspace
+    check through forward kinematics.
+- **`RolloutRuntime._build_cartesian_setting` / `_start_live_hold` / `_tick`**
+  - They send the Cartesian mode settings (`,8,`), build the filter from
+    `state.base_pose`, and send `build_tmrtc_pose_target(pose)`. All of these
+    need joint-mode equivalents.
+- **`RolloutRuntime._request_inference_if_needed` and the loop in `run`**
+  - The settle check before inference uses `INFERENCE_SETTLED_POSITION_MM` /
+    `INFERENCE_SETTLED_ORIENTATION_DEG`.
+  - Live tracking aborts at `TRACKING_ABORT_MM` /
+    `MAX_TRACKING_ORIENTATION_ERROR_DEG`.
+  - Both use the Cartesian `pose_error`. Use joint-space errors or forward
+    kinematics instead.
+- **Gripper width**
+  - `RolloutGripper` commands 6.5 mm on CLOSE. During joint data collection,
+    the commanded widths were exactly 0 mm (closed) and 85 mm (open).
+  - Ask the user which to use. `_apply_gripper` hysteresis (close `>= 0.70`,
+    open `<= 0.30`) can stay.
+
+### Facts for limit design
+
+These are diagnostics, not safety limits:
+
+- Recorded action deltas peak at 2.34, 2.29, 2.33, 2.25, 2.15, 1.61 deg for
+  joints 1-6.
+- Each delta is commanded minus measured at the same step: the controller's
+  tracking offset, not per-step motion. Do not treat it as a velocity.
+- Data collection limited joint speed to 17 deg/s. Reject or stop on any
+  predicted delta well outside the recorded range instead of clipping silently.
+
+### Keep unchanged
+
+- Prediction-only default, `--enable-actuation` plus Enter confirmation, and
+  `--hold-only`.
+- Stale feedback/camera checks and camera skew check.
+- `MAX_JOINT_CHANGE_PER_SAMPLE_DEG` feedback check.
+- Inference timeout and stale-result rejection.
+- Generation invalidation (X), software stop, and guarded joint home.
+
+### Validation order
+
+1. Prediction-only against the policy server, logging predicted joint targets.
+2. Compare those targets with the dataset ranges.
+3. `--hold-only` stop test.
+4. Live actuation, only with explicit user approval each session.
 
 ## Local inference
 
