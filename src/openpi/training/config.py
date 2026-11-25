@@ -1096,6 +1096,41 @@ _CONFIGS = [
         fsdp_devices=1,
         wandb_enabled=True,
     ),
+    # Same recipe and action convention as pi05_tm7s_joint_delta_lora, on the
+    # 50-episode single-task bowl dataset collected 2026-11-25 (converted with
+    # --action-space joint). This session was recorded faster than 11-19 (measured
+    # joint speed up to about 25 deg/s, deltas up to about 3.05 deg).
+    TrainConfig(
+        name="pi05_tm7s_joint_delta_1125_lora",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=80,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotTM7SDataConfig(
+            repo_id="local/tm7s_joint_delta_1125",
+            root="data/tm7s_lerobot_joint_50ep_1125",
+            use_delta_pose_actions=False,
+            wrap_rx=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        num_train_steps=10_000,
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_dim=32,
+            action_horizon=16,
+            max_token_len=80,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        batch_size=3,
+        fsdp_devices=1,
+        wandb_enabled=True,
+    ),
     #
     # ALOHA Sim configs. This config is used to demonstrate how to train on a simple simulated environment.
     #
