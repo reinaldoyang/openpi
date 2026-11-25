@@ -278,18 +278,22 @@ The following were verified against the current file:
 
 ### Facts for limit design
 
-These are diagnostics, not safety limits:
+These are diagnostics, not safety limits. The newest dataset (currently 1125)
+is the reference; update these figures when a newer dataset is collected.
 
-- Recorded action deltas peak at 2.34, 2.29, 2.33, 2.25, 2.15, 1.61 deg for
-  joints 1-6.
+- 1125 action deltas peak at 3.05, 2.55, 3.04, 2.85, 2.48, 1.93 deg for
+  joints 1-6 (99.9th percentile 2.90, 2.41, 2.72, 2.69, 1.75, 1.65 deg).
 - Each delta is commanded minus measured at the same step: the controller's
   tracking offset, not per-step motion. Do not treat it as a velocity.
-- Data collection limited joint speed to 17 deg/s. Reject or stop on any
-  predicted delta well outside the recorded range instead of clipping silently.
-- The 1125 dataset was recorded faster: action deltas peak at 3.05, 2.55, 3.04,
-  2.85, 2.48, 1.93 deg and measured joint speed at about 25 deg/s. Its
-  collection speed limit is unconfirmed. Use the ranges of the dataset the
-  checkpoint was trained on.
+- 1125 measured joint speed tops out at 24.7, 23.3, 26.0, 24.0, 23.8,
+  24.1 deg/s for joints 1-6, consistent with a collection limit near 25 deg/s.
+  The configured value is not recorded in the dataset; confirm it with the
+  user before using it in a controller.
+- Reject or stop on any predicted delta well outside the recorded range instead
+  of clipping silently.
+- Older 1119 data (for the `tm7s_joint_delta_54ep` checkpoint only): deltas
+  peak at 2.34, 2.29, 2.33, 2.25, 2.15, 1.61 deg, collected with a 17 deg/s
+  joint speed limit.
 
 ### Keep unchanged
 
