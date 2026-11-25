@@ -25,24 +25,30 @@ older TCP-space datasets, checkpoints, and norm stats were deleted from this
 server. Do not mix TCP-space and joint-space artifacts, resume from one into the
 other, or compare their losses.
 
-- Training config: `pi05_tm7s_joint_delta_lora` in
-  `src/openpi/training/config.py`.
-- Planned experiment name: `tm7s_joint_delta_54ep`, giving checkpoints under
-  `checkpoints/pi05_tm7s_joint_delta_lora/tm7s_joint_delta_54ep/<step>`.
-  No joint-space checkpoint has been trained or selected yet.
-- Norm stats: `assets/pi05_tm7s_joint_delta_lora/local/tm7s_joint_delta_1119/norm_stats.json`,
-  computed with
-  `uv run scripts/compute_norm_stats.py --config-name pi05_tm7s_joint_delta_lora`.
-  Recompute them whenever the dataset or `exclude_episodes` changes; never reuse
-  stats from another config.
+There are two joint-space configs in `src/openpi/training/config.py`. They share
+the recipe and action convention but use different datasets (see "Dataset"):
+
+- `pi05_tm7s_joint_delta_lora`: 54-episode, 4-task 1119 dataset.
+  - Experiment `tm7s_joint_delta_54ep`, trained to step 9999 on 2026-11-20:
+    `checkpoints/pi05_tm7s_joint_delta_lora/tm7s_joint_delta_54ep/9999`. Not yet
+    evaluated or selected.
+  - Norm stats: `assets/pi05_tm7s_joint_delta_lora/local/tm7s_joint_delta_1119/norm_stats.json`.
+- `pi05_tm7s_joint_delta_1125_lora`: 50-episode, single-task 1125 dataset.
+  - Experiment `tm7s_joint_delta_1125_50ep`, started 2026-11-25 on one GPU:
+    `checkpoints/pi05_tm7s_joint_delta_1125_lora/tm7s_joint_delta_1125_50ep/<step>`.
+  - Norm stats: `assets/pi05_tm7s_joint_delta_1125_lora/local/tm7s_joint_delta_1125/norm_stats.json`.
+- Compute norm stats with
+  `uv run scripts/compute_norm_stats.py --config-name <config>` (it runs fine on
+  CPU with `JAX_PLATFORMS=cpu`). Recompute them whenever the dataset or
+  `exclude_episodes` changes; never reuse stats from another config.
 - Training command (only when the user asks for the run; see the next section
   for choosing `<free_gpu>`):
 
   ```bash
   OPENPI_DATA_HOME=/data/reinaldoyang/openpi_cache \
+  HF_DATASETS_CACHE=/data/reinaldoyang/hf_cache/datasets \
   CUDA_VISIBLE_DEVICES=<free_gpu> XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 \
-    uv run scripts/train.py \
-    pi05_tm7s_joint_delta_lora --exp-name=tm7s_joint_delta_54ep
+    uv run scripts/train.py <config> --exp-name=<exp>
   ```
 
 ## Training server environment
@@ -61,6 +67,10 @@ training, norm-stats, or serving run on it:
     `OUT_OF_RANGE ... byte range` error. Orbax still wrote
     `commit_success.txt`, so openpi will not re-download a truncated copy by
     itself; delete it first.
+  - LeRobot writes a parquet cache through Hugging Face `datasets`, which
+    defaults to `~/.cache/huggingface/datasets` on the root disk. Set
+    `HF_DATASETS_CACHE=/data/reinaldoyang/hf_cache/datasets` for norm-stats,
+    training, and dataset-loading commands.
   - Run `df -h / /data` before downloading anything large.
 - **GPU.**
   - The server has three RTX 6000 Ada GPUs (48 GB each), and other users run
@@ -70,6 +80,9 @@ training, norm-stats, or serving run on it:
     `XLA_PYTHON_CLIENT_MEM_FRACTION` of memory on every visible GPU and can
     crash other users' jobs.
   - The config uses one GPU (`fsdp_devices=1`).
+  - With batch size 3, 10,000 steps took 87-91 minutes on 1, 2, or 3 GPUs
+    alike (W&B runs 2026-10-26 to 2026-11-20). Extra GPUs only help with a
+    larger global batch, which changes the recipe.
 - **Launch.**
   - Start long runs detached
     (`nohup setsid ... > train_<exp>.log 2>&1 < /dev/null &`) so they survive
@@ -81,7 +94,8 @@ training, norm-stats, or serving run on it:
 
 - An inference installation needs the complete `params/` tree,
   `_CHECKPOINT_METADATA`, and the checkpoint's
-  `assets/local/tm7s_joint_delta_1119/norm_stats.json`. `train_state/` is not
+  `assets/local/<repo_id name>/norm_stats.json` (`tm7s_joint_delta_1119` or
+  `tm7s_joint_delta_1125`). `train_state/` is not
   required. Checkpoints use JAX/Orbax; preserve every file under `params/`,
   because individual OCDBT files are not independently usable.
 
@@ -115,7 +129,8 @@ Both are 7 values: six joints in radians, then gripper.
   a binary absolute gripper command (0 = open, 1 = closed).
   - The delta is step-wise: each step is relative to the measured joints at the
     same step, not to the state at the start of the chunk.
-  - Recorded deltas are at most about 0.04 rad (2.3 deg) per step.
+  - Recorded deltas are at most about 0.04 rad (2.3 deg) per step in the 1119
+    data and 0.053 rad (3.05 deg) in the faster 1125 data.
 - Because no output delta transform is applied, the policy returns a `(16, 7)`
   chunk of joint deltas plus gripper, not absolute joint targets. To execute
   step `k`, command `measured_joints_now + actions[k, :6]`, reading the
@@ -152,15 +167,31 @@ observation = {
 
 ## Dataset
 
-- Path: `data/tm7s_lerobot_joint_54ep_1119`, `repo_id`
-  `local/tm7s_joint_delta_1119` (local only, collected 2026-11-19).
-- LeRobot v3.0, 54 episodes, 32,994 frames, 15 Hz. The 16-step horizon covers
-  about 1.07 seconds.
-- Converted with the `tm7s_teleop_rtrs` converter (`--action-space joint`,
-  commit `bae2ce3`). The folder's `HANDOFF.md` describes the conversion.
+Two joint-space datasets, both LeRobot v3.0 at 15 Hz (the 16-step horizon
+covers about 1.07 seconds):
+
+- 1119: `data/tm7s_lerobot_joint_54ep_1119`, `repo_id`
+  `local/tm7s_joint_delta_1119` (collected 2026-11-19). 54 episodes, 32,994
+  frames, the 4 tasks below.
+  - Converted with the `tm7s_teleop_rtrs` converter (`--action-space joint`,
+    commit `bae2ce3`). The folder's `HANDOFF.md` describes the conversion.
+  - No longer on this server (as of 2026-11-25); its norm stats and checkpoint
+    remain.
+- 1125: `data/tm7s_lerobot_joint_50ep_1125`, `repo_id`
+  `local/tm7s_joint_delta_1125` (collected 2026-11-25). 50 episodes, 11,119
+  frames (170-291 per episode), single task
+  `Pick up the bowl and place it in the green basket`.
+  - Converted with `teleoperation.convert_tm7s_to_lerobot` (LeRobot 0.4.4,
+    `action_space: joint`); see `tm7s_conversion_manifest.json` in the folder.
+  - Verified on all frames: same state/action convention as 1119, gripper state
+    `(85 - width_mm) / 85`, gripper commands only 0/85 mm.
+  - Recorded faster than 1119: measured joint speed up to about 25 deg/s.
+  - A first copy was taken mid-conversion (truncated parquet files, 38
+    episodes). If a dataset will not open, check that conversion finished.
 - Both cameras use AV1 video, decoded with the PyAV backend.
 - `auxiliary.*` columns (raw joints, gripper widths in mm) are not model inputs.
-- The prompt is the per-episode `task`. Use these exact strings at inference:
+- The prompt is the per-episode `task`. Use these exact strings at inference
+  (1119 tasks; the 1125 task is the last one):
   - 24 episodes: `Pick up all the bowls and place it in the green basket and pick up all the cups and place it in the red basket`
   - 10 episodes: `Pick up all the bowl and place it in the green basket`
   - 10 episodes: `Pick up all the cups and place it in the red basket`
@@ -255,6 +286,10 @@ These are diagnostics, not safety limits:
   tracking offset, not per-step motion. Do not treat it as a velocity.
 - Data collection limited joint speed to 17 deg/s. Reject or stop on any
   predicted delta well outside the recorded range instead of clipping silently.
+- The 1125 dataset was recorded faster: action deltas peak at 3.05, 2.55, 3.04,
+  2.85, 2.48, 1.93 deg and measured joint speed at about 25 deg/s. Its
+  collection speed limit is unconfirmed. Use the ranges of the dataset the
+  checkpoint was trained on.
 
 ### Keep unchanged
 
